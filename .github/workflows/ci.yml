@@ -1,4 +1,4 @@
-name: CI Pipeline
+name: CI/CD Pipeline
 
 on:
   push:
@@ -12,42 +12,70 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
 
 jobs:
   test:
     runs-on: ubuntu-latest
 
     steps:
+      # -----------------------------
+      # 1. Checkout
+      # -----------------------------
       - name: Checkout code
         uses: actions/checkout@v5
 
+      # -----------------------------
+      # 2. Setup Node.js
+      # -----------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
 
+      # -----------------------------
+      # 3. Install dependencies
+      # -----------------------------
       - name: Install dependencies
         run: npm ci
 
+      # -----------------------------
+      # 4. Start application
+      # -----------------------------
       - name: Start application
         run: |
           node app.js > app.log 2>&1 &
           echo $! > app.pid
           sleep 5
 
+      # -----------------------------
+      # 5. Test application
+      # -----------------------------
       - name: Test application
         run: curl --fail http://localhost:3000
 
+      # -----------------------------
+      # 6. Stop application
+      # -----------------------------
       - name: Stop application
         if: always()
-        run: kill $(cat app.pid) || true
+        run: |
+          if [ -f app.pid ]; then
+            kill "$(cat app.pid)" || true
+          fi
 
+      # -----------------------------
+      # 7. Build Docker image
+      # -----------------------------
       - name: Build Docker image
         run: |
-              docker build \
-              -t ghcr.io/${{ github.repository_owner }}/ci-cd-demo:latest .
+          docker build \
+            -t ghcr.io/${{ github.repository_owner }}/ci-cd-demo:latest .
 
+      # -----------------------------
+      # 8. Security scan
+      # -----------------------------
       - name: Scan Docker image with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -57,12 +85,57 @@ jobs:
           ignore-unfixed: true
           severity: CRITICAL,HIGH
 
+      # -----------------------------
+      # 9. Login to GHCR
+      # -----------------------------
       - name: Login to GHCR
+        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
-            registry: ghcr.io
-            username: ${{ github.actor }}
-            password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
+      # -----------------------------
+      # 10. Push image to GHCR
+      # -----------------------------
       - name: Push Docker image
-        run: docker push ghcr.io/${{ github.repository_owner }}/ci-cd-demo:latest
+        if: github.event_name == 'push'
+        run: |
+          docker push ghcr.io/${{ github.repository_owner }}/ci-cd-demo:latest
+
+      # -----------------------------
+      # 11. Authenticate to AWS
+      # -----------------------------
+      - name: Configure AWS credentials
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::941377151096:role/GitHubActions-EKS-Deploy
+          aws-region: eu-west-1
+
+      # -----------------------------
+      # 12. Configure kubectl
+      # -----------------------------
+      - name: Update kubeconfig
+        if: github.event_name == 'push'
+        run: |
+          aws eks update-kubeconfig \
+            --region eu-west-1 \
+            --name eks-on-terraform-cluster
+
+      # -----------------------------
+      # 13. Deploy to EKS
+      # -----------------------------
+      - name: Deploy to EKS
+        if: github.event_name == 'push'
+        run: |
+          kubectl rollout restart deployment ci-cd-demo
+
+      # -----------------------------
+      # 14. Wait for rollout
+      # -----------------------------
+      - name: Wait for deployment
+        if: github.event_name == 'push'
+        run: |
+          kubectl rollout status deployment ci-cd-demo --timeout=5m
