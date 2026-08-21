@@ -34,7 +34,10 @@ jobs:
 
       - name: Test application
         run: curl --fail http://localhost:3000
-
+      
       - name: Stop application
         if: always()
         run: kill $(cat app.pid) || true
+
+      - name: Build Docker image
+        run: docker build -t ci-cd-demo:latest .
