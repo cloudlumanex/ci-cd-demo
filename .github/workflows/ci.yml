@@ -20,7 +20,7 @@ jobs:
 
     steps:
       # -----------------------------
-      # 1. Checkout
+      # 1. Checkout code
       # -----------------------------
       - name: Checkout code
         uses: actions/checkout@v5
@@ -105,16 +105,9 @@ jobs:
           docker push ghcr.io/${{ github.repository_owner }}/ci-cd-demo:latest
 
       # -----------------------------
-      # 11. Authenticate to AWS
+      # 11. Debug GitHub context
       # -----------------------------
-      - name: Configure AWS credentials
-        if: github.event_name == 'push'
-        uses: aws-actions/configure-aws-credentials@v5
-        with:
-          role-to-assume: arn:aws:iam::941377151096:role/GitHubActions-EKS-Deploy
-          aws-region: eu-west-1
-
-      - name: Debug GitHub OIDC context
+      - name: Debug GitHub context
         if: github.event_name == 'push'
         run: |
           echo "Repository: ${{ github.repository }}"
@@ -124,7 +117,25 @@ jobs:
           echo "Repository Owner ID: ${{ github.repository_owner_id }}"
 
       # -----------------------------
-      # 12. Configure kubectl
+      # 12. Authenticate to AWS
+      # -----------------------------
+      - name: Configure AWS credentials
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: arn:aws:iam::941377151096:role/GitHubActions-EKS-Deploy
+          aws-region: eu-west-1
+
+      # -----------------------------
+      # 13. Verify AWS identity
+      # -----------------------------
+      - name: Verify AWS identity
+        if: github.event_name == 'push'
+        run: |
+          aws sts get-caller-identity
+
+      # -----------------------------
+      # 14. Configure kubectl
       # -----------------------------
       - name: Update kubeconfig
         if: github.event_name == 'push'
@@ -134,7 +145,7 @@ jobs:
             --name eks-on-terraform-cluster
 
       # -----------------------------
-      # 13. Deploy to EKS
+      # 15. Deploy to EKS
       # -----------------------------
       - name: Deploy to EKS
         if: github.event_name == 'push'
@@ -142,7 +153,7 @@ jobs:
           kubectl rollout restart deployment ci-cd-demo
 
       # -----------------------------
-      # 14. Wait for rollout
+      # 16. Wait for rollout
       # -----------------------------
       - name: Wait for deployment
         if: github.event_name == 'push'
